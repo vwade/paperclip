@@ -465,6 +465,154 @@ describe("agent routes adapter validation", () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
+  it("drops incompatible aiConnection when switching adapter type", async () => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    mockAgentService.getById.mockResolvedValue({
+      id: agentId,
+      companyId: "22222222-2222-4222-8222-222222222222",
+      name: "Codex",
+      urlKey: "codex",
+      role: "engineer",
+      title: null,
+      icon: null,
+      status: "idle",
+      reportsTo: null,
+      capabilities: null,
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        aiConnection: {
+          provider: "openai",
+          method: "subscription",
+          mode: "responsible_user",
+        },
+      },
+      budgetMonthlyCents: 0,
+      spentMonthlyCents: 0,
+      pauseReason: null,
+      pausedAt: null,
+      permissions: { canCreateAgents: false },
+      lastHeartbeatAt: null,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const app = await createApp();
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({
+          adapterType: "process",
+          adapterConfig: { command: "node worker.js" },
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const patch = mockAgentService.update.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(patch.adapterType).toBe("process");
+    const runtimeConfig = patch.runtimeConfig as Record<string, unknown>;
+    expect(runtimeConfig).toBeDefined();
+    expect(runtimeConfig.aiConnection).toBeUndefined();
+  });
+
+  it("drops an OpenAI responsible_user binding on an adapterType-only switch from codex_local to cursor", async () => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    mockAgentService.getById.mockResolvedValue({
+      id: agentId,
+      companyId: "company-1",
+      name: "Fleet",
+      urlKey: "fleet",
+      role: "engineer",
+      title: null,
+      icon: null,
+      status: "idle",
+      reportsTo: null,
+      capabilities: null,
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        heartbeat: { enabled: true, intervalSec: 300 },
+        aiConnection: {
+          provider: "openai",
+          method: "subscription",
+          mode: "responsible_user",
+        },
+      },
+      budgetMonthlyCents: 0,
+      spentMonthlyCents: 0,
+      pauseReason: null,
+      pausedAt: null,
+      permissions: { canCreateAgents: false },
+      lastHeartbeatAt: null,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const app = await createApp();
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({ adapterType: "cursor" }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.adapterType).toBe("cursor");
+    expect(res.body.runtimeConfig?.aiConnection).toBeUndefined();
+    const patch = mockAgentService.update.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(patch.adapterType).toBe("cursor");
+    expect(patch.runtimeConfig).toEqual({ heartbeat: { enabled: true, intervalSec: 300 } });
+  });
+
+  it("keeps a compatible aiConnection on a same-adapter runtimeConfig patch that omits it", async () => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    const aiConnection = {
+      provider: "openai",
+      method: "subscription",
+      mode: "responsible_user",
+    };
+    mockAgentService.getById.mockResolvedValue({
+      id: agentId,
+      companyId: "company-1",
+      name: "Fleet",
+      urlKey: "fleet",
+      role: "engineer",
+      title: null,
+      icon: null,
+      status: "idle",
+      reportsTo: null,
+      capabilities: null,
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: { aiConnection },
+      budgetMonthlyCents: 0,
+      spentMonthlyCents: 0,
+      pauseReason: null,
+      pausedAt: null,
+      permissions: { canCreateAgents: false },
+      lastHeartbeatAt: null,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const app = await createApp();
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({
+          adapterType: "codex_local",
+          runtimeConfig: { heartbeat: { enabled: true, intervalSec: 600 } },
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const patch = mockAgentService.update.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(patch.adapterType).toBe("codex_local");
+    expect(patch.runtimeConfig).toEqual({
+      heartbeat: { enabled: true, intervalSec: 600 },
+      aiConnection,
+    });
+  });
+
   it("isolates CODEX_HOME when updating a codex_local agent to set its own OPENAI_API_KEY", async () => {
     const agentId = "11111111-1111-4111-8111-111111111111";
     const app = await createApp();
